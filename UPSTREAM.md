@@ -15,4 +15,11 @@ them is on `local`). Each topic branch is one change on top of `v0.1.0`.
 Not changed (reported only): `rec serve` answers HTTP 400 to `stream_options` other than exactly
 `{"include_usage": true}` and drops `ignore_eos` / `min_tokens` (eejd/py-rec#2).
 
-Tags: `v0.1.0-local01` (current).
+Tags: `v0.1.0-local01` (superseded: tests only, see below) and `v0.1.0-local02` (current;
+local01 + stricter tests of `topic/host-mlx-lm-0.32`, no change to non-test code).
+
+`topic/host-mlx-lm-0.32` does **not** merge onto fork `main` today (CONFLICT in
+`engine/src/rec_mlx/scheduler.py`: upstream's "Derive tool call IDs from the request seed" commit
+changes the adjacent `GenerationContext(...)` line). The next re-cut onto a release that contains
+those commits needs that one manual resolution (keep `seeded_tool_parser(sampling, ids)` and the
+new context fields); the three packaging topics merge onto `main` cleanly.
