@@ -99,3 +99,23 @@ func TestDoctorSurvivesFailedReleaseLookup(t *testing.T) {
 		t.Fatalf("summary = %q", got)
 	}
 }
+
+func TestUpdaterBuildSwitchNeverFetchesOrRunsAnInstaller(t *testing.T) {
+	dir := fakeReleases(t)
+	setVersion(t, "0.2.0")
+	previous := updateDisabled
+	updateDisabled = "managed by the package manager"
+	t.Cleanup(func() { updateDisabled = previous })
+
+	var out bytes.Buffer
+	err := update([]string{"-y"}, strings.NewReader(""), &out)
+	if err == nil || err.Error() != "managed by the package manager" {
+		t.Fatalf("update returned %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "installed")); !os.IsNotExist(statErr) {
+		t.Fatal("the disabled updater ran an installer")
+	}
+	if got := updateSummary(); got != "" {
+		t.Fatalf("doctor looked up releases: %q", got)
+	}
+}

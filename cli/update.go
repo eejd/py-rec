@@ -16,10 +16,19 @@ import (
 	"time"
 )
 
+// updateDisabled is set at build time (-X main.updateDisabled=...) by a package
+// manager that owns upgrades. A non-empty value is the message rec update prints
+// instead of fetching and running an installer, and it also silences the release
+// lookup of rec doctor. It is empty in upstream's release build.
+var updateDisabled = ""
+
 func update(args []string, in io.Reader, out io.Writer) error {
 	if wantsHelp(args) {
 		printUsage(out, "update")
 		return nil
+	}
+	if updateDisabled != "" {
+		return fmt.Errorf("%s", updateDisabled)
 	}
 	flags := flag.NewFlagSet("update", flag.ContinueOnError)
 	yes := flags.Bool("y", false, "update without asking")
@@ -62,6 +71,9 @@ func update(args []string, in io.Reader, out io.Writer) error {
 
 // updateSummary describes a newer release for rec doctor, or returns "" when rec is current.
 func updateSummary() string {
+	if updateDisabled != "" {
+		return ""
+	}
 	latest, err := latestRelease()
 	if err != nil {
 		return warningStyle.Render("could not check for a newer release")
