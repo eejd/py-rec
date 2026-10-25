@@ -5,12 +5,7 @@ from dataclasses import asdict
 from queue import Empty, Queue
 from types import SimpleNamespace
 
-from mlx_lm.server import (
-    GenerationContext,
-    Response,
-    ResponseGenerator,
-    _process_control_tokens,
-)
+from mlx_lm.server import GenerationContext, Response, ResponseGenerator
 from mlx_lm.tokenizer_utils import NaiveStreamingDetokenizer, TokenizerWrapper
 
 from .chat import parse_tool_call
@@ -31,6 +26,13 @@ class ModelProvider:
     def load(self, model, adapter, draft):
         return self.engine, self.tokenizer
 
+    # mlx-lm >= 0.32 tags generations with the model key and resets the provider when its
+    # worker thread exits; this provider serves one engine for its whole life.
+    model_key = "flint"
+
+    def reset(self):
+        pass
+
 
 class Generator(ResponseGenerator):
     def __init__(self, engine, metrics_path, defaults):
@@ -45,6 +47,9 @@ class Generator(ResponseGenerator):
             tool_call_start="<tool_call>",
             tool_call_end="</tool_call>",
         )
+        # mlx-lm >= 0.32 adds the tokenizer's own eos_token_id to the stop set; rec stops on the
+        # checkpoint's eos_token_id list (engine.eos) and nothing else.
+        self.tokenizer.eos_token_ids = engine.eos
         cli_args = SimpleNamespace(
             allowed_origins=[],
             num_draft_tokens=0,
@@ -73,6 +78,12 @@ class Generator(ResponseGenerator):
                     break
                 response_queue.put(RuntimeError("The server is stopping"))
 
+    def _run_generate(self):
+        # mlx-lm >= 0.32 logs a dying worker and marks it failed; rec lets the exception reach
+        # threading.excepthook with its traceback, as under mlx-lm 0.31 (a dead thread makes
+        # generation_available() false either way).
+        self._generate()
+
     def _generate(self):
         try:
             super()._generate()
@@ -100,9 +111,9 @@ class Generator(ResponseGenerator):
                 yield response
 
         request.generation_context = ctx
-        return ctx, _process_control_tokens(ctx, responses())
+        return ctx, responses()
 
-    def _serve_single(self, queued_request):
+    def _serve_single(self, queued_request, stream=None):
         response_queue, request, args = queued_request
         try:
             if self.stopping.is_set():
@@ -145,17 +156,23 @@ class Generator(ResponseGenerator):
             seed=self.defaults.seed if args.seed is None else args.seed,
         )
         ids = request.prompt_tokens
-        sm, sequences = ResponseGenerator._make_state_machine(
+        # mlx-lm >= 0.32 splits the work: token-level stop sequences end the generation, a
+        # text-level state machine (owned by the HTTP handler through the context) strips
+        # <think>/<tool_call> markers. The prompt ends at <|assistant|>, so the response
+        # always starts in the normal state.
+        stop_sequences, text_sm = ResponseGenerator._make_state_machine(
             self,
-            "flint",
+            self.model_provider.model_key,
             self.tokenizer,
             args.stop_words,
+            args.ignore_eos,
         )
         ctx = GenerationContext(
             has_tool_calling=bool(request.tools),
             has_thinking=self.tokenizer.has_thinking,
             tool_parser=parse_tool_call,
-            sequences=sequences,
+            text_sm=text_sm,
+            initial_state="normal",
             prompt=ids,
         )
         self.active_context = ctx
@@ -174,10 +191,10 @@ class Generator(ResponseGenerator):
             should_stop=lambda: ctx._should_stop or cancelled(),
             **options,
         )
-        return ctx, self.responses(raw, ctx, sm, sampling, cancelled, args.logprobs)
+        return ctx, self.responses(raw, ctx, stop_sequences, sampling, cancelled, args.logprobs)
 
-    def responses(self, raw, ctx, sm, sampling, cancelled, logprobs=False):
-        state = sm.make_state()
+    def responses(self, raw, ctx, stop_sequences, sampling, cancelled, logprobs=False):
+        stop_matcher = stop_sequences.matcher()
         tokens = []
         complete = False
         try:
@@ -195,16 +212,13 @@ class Generator(ResponseGenerator):
                     break
                 token = event["token"]
                 tokens.append(token)
-                state, match, current = sm.match(state, token)
                 finish = event["finish_reason"]
-                if current is None:
+                if stop_matcher.advance(token):
                     finish = "stop"
                     ctx.stop()
                 yield Response(
                     event["text"],
                     token,
-                    current,
-                    match,
                     event["logprob"] if logprobs else 0.0,
                     finish,
                     (),
