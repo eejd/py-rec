@@ -15,6 +15,10 @@ from rec_mlx.server import make_server
 
 class Tokenizer:
     chat_template = "test"
+    eos_token_id = None  # read by mlx-lm >= 0.32's TokenizerWrapper
+
+    def apply_chat_template(self, *args, **kwargs):
+        raise AssertionError("rec renders prompts itself")  # looked up by the same wrapper
 
     def get_vocab(self):
         return {}
