@@ -4,6 +4,12 @@ import mlx.core as mx
 from mlx_lm.sample_utils import make_sampler
 
 
+def restore_random_key(key):
+    """Restore an MLX key using the public seed API (two uint32 words, high first)."""
+    high, low = key.tolist()
+    mx.random.seed((high << 32) | low)
+
+
 class FilteredResidentSampler:
     def __init__(self, module, engine, specification):
         self.module, self.engine = module, engine
@@ -202,7 +208,7 @@ if(!active) {{
         if logprobs is not None:
             logprobs.extend(out[7 if presence_penalty else 6][:produced].tolist())
         # Restore the exact scalar sampler's key when EOS truncates the packet.
-        mx.random.state[0] = out[5][produced - 1]
+        restore_random_key(out[5][produced - 1])
         if presence_penalty:
             state["presence_mask"] = out[6]
         state["position"] += produced
