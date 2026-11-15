@@ -125,6 +125,7 @@ class HostMlxLmTest(unittest.TestCase):
         self.assertEqual(choice["finish_reason"], "stop")
         self.assertEqual(self.engine.emitted, 2)
 
+    @unittest.skipUnless(hasattr(TextStateMachine, "from_stop_words"), "requires reader API")
     def test_partial_stop_word_is_flushed_at_eos(self):
         server = self.serve(["aEN", EOS])
         status, body = self.post(server, grammar="none", stop=["END"])
