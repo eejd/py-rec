@@ -5,6 +5,7 @@ from dataclasses import asdict
 from queue import Empty, Queue
 from types import SimpleNamespace
 
+from mlx_lm.generate import TextStateMachine
 from mlx_lm.server import GenerationContext, Response, ResponseGenerator
 from mlx_lm.tokenizer_utils import NaiveStreamingDetokenizer, TokenizerWrapper
 
@@ -160,13 +161,17 @@ class Generator(ResponseGenerator):
         # text-level state machine (owned by the HTTP handler through the context) strips
         # <think>/<tool_call> markers. The prompt ends at <|assistant|>, so the response
         # always starts in the normal state.
-        stop_sequences, text_sm = ResponseGenerator._make_state_machine(
-            self,
-            self.model_provider.model_key,
-            self.tokenizer,
-            args.stop_words,
-            args.ignore_eos,
-        )
+        if hasattr(TextStateMachine, "from_tokenizer"):
+            from mlx_lm.generate import make_stop_sequences
+
+            stop_sequences = make_stop_sequences(self.tokenizer, ignore_eos=args.ignore_eos)
+            stop_reader = TextStateMachine.from_stop_words(args.stop_words).reader()
+            text_sm = TextStateMachine.from_tokenizer(self.tokenizer)
+        else:
+            stop_sequences, text_sm = ResponseGenerator._make_state_machine(
+                self, self.model_provider.model_key, self.tokenizer, args.stop_words, args.ignore_eos
+            )
+            stop_reader = None
         ctx = GenerationContext(
             has_tool_calling=bool(request.tools),
             has_thinking=self.tokenizer.has_thinking,
@@ -191,9 +196,9 @@ class Generator(ResponseGenerator):
             should_stop=lambda: ctx._should_stop or cancelled(),
             **options,
         )
-        return ctx, self.responses(raw, ctx, stop_sequences, sampling, cancelled, args.logprobs)
+        return ctx, self.responses(raw, ctx, stop_sequences, stop_reader, sampling, cancelled, args.logprobs)
 
-    def responses(self, raw, ctx, stop_sequences, sampling, cancelled, logprobs=False):
+    def responses(self, raw, ctx, stop_sequences, stop_reader, sampling, cancelled, logprobs=False):
         stop_matcher = stop_sequences.matcher()
         tokens = []
         complete = False
@@ -215,9 +220,16 @@ class Generator(ResponseGenerator):
                 finish = event["finish_reason"]
                 if stop_matcher.advance(token):
                     finish = "stop"
+                text = event["text"]
+                if stop_reader is not None:
+                    delta = stop_reader.feed(text) if finish is None else stop_reader.finish(text)
+                    text = delta.content
+                    if stop_reader.stopped:
+                        finish = "stop"
+                if finish == "stop":
                     ctx.stop()
                 yield Response(
-                    event["text"],
+                    text,
                     token,
                     event["logprob"] if logprobs else 0.0,
                     finish,
