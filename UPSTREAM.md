@@ -8,6 +8,7 @@ them is on `local`). The random-state topic is based on `local`; the earlier top
 | Topic branch | What | Upstream | Kind |
 |---|---|---|---|
 | `topic/host-mlx-lm-0.32` | `rec_mlx` runs on mlx-lm 0.32.x instead of the pinned 0.31.3: stop sequences + text state machine, `_serve_single(request, stream)`, worker failure reported as before; `pyproject` pin `mlx-lm>=0.32.2,<0.33`; tests | not submitted (eejd/py-rec#1). Upstream pins 0.31.3 on purpose | behaviour-preserving adaptation to a newer mlx-lm API |
+| `topic/mlx-lm-local06-reader` | Adapt the scheduler to mlx-lm's reader-based text machines and decoded-text stop words, retaining the original 0.32.2 API path required by the declared bounds | not submitted; based on upstream ml-explore/mlx-lm ab7f704 and tested with eejd/py-mlx-lm v0.32.2-local06 | host mlx-lm compatibility |
 | `topic/host-mlx-random-state` | Restore the exact resident sampler RNG key through `mx.random.seed` rather than assigning to the read-only MLX 0.32.4 random-state sentinel; regression test | not submitted (eejd/py-rec#1) | host MLX compatibility |
 | `topic/go-gopath-godebug` | `//go:debug default=go1.25` in `cli/main.go`: a build without `go.mod` (GOPATH mode) gets Go 1.20 GODEBUG defaults, under which rec's control server (`GET /status` patterns) never matches | not submitted (eejd/macports-ports-local#1473) | packaging-only |
 | `topic/updater-build-switch` | `-X main.updateDisabled=<message>`: `rec update` prints the message instead of running a downloaded installer, `rec doctor` skips the release lookup; empty = upstream behaviour | not submitted (eejd/macports-ports-local#1473) | packaging-only |
@@ -18,6 +19,10 @@ Not changed (reported only): `rec serve` answers HTTP 400 to `stream_options` ot
 
 Tags: `v0.1.0-local01` (superseded), `v0.1.0-local02` (mlx-lm compatibility tests), and
 `v0.1.0-local03` (current; adds host MLX random-state compatibility).
+
+| Next tag | Contents | Status |
+|---|---|---|
+| `v0.1.0-local04` | `v0.1.0-local03` + reader compatibility topic | not yet cut |
 
 `topic/host-mlx-lm-0.32` does **not** merge onto fork `main` today (CONFLICT in
 `engine/src/rec_mlx/scheduler.py`: upstream's "Derive tool call IDs from the request seed" commit

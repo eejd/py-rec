@@ -11,6 +11,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from mlx_lm.generate import TextStateMachine
 
 from rec_mlx.server import make_server
 from test_serving import Engine, Tokenizer
@@ -113,6 +114,24 @@ class HostMlxLmTest(unittest.TestCase):
         self.assertEqual(choice["message"]["content"], "a")
         self.assertEqual(choice["finish_reason"], "stop")
         self.assertEqual(self.engine.emitted, 4)
+
+    @unittest.skipUnless(hasattr(TextStateMachine, "from_stop_words"), "requires reader API")
+    def test_stop_word_matches_decoded_text_with_different_tokenization(self):
+        server = self.serve([(42, "aEN"), (43, "Ddiscard"), "junk"])
+        status, body = self.post(server, grammar="none", stop=["END"])
+        self.assertEqual(status, 200, body)
+        choice = json.loads(body)["choices"][0]
+        self.assertEqual(choice["message"]["content"], "a")
+        self.assertEqual(choice["finish_reason"], "stop")
+        self.assertEqual(self.engine.emitted, 2)
+
+    def test_partial_stop_word_is_flushed_at_eos(self):
+        server = self.serve(["aEN", EOS])
+        status, body = self.post(server, grammar="none", stop=["END"])
+        self.assertEqual(status, 200, body)
+        choice = json.loads(body)["choices"][0]
+        self.assertEqual(choice["message"]["content"], "aEN")
+        self.assertEqual(choice["finish_reason"], "stop")
 
     def test_reasoning_is_split_from_the_answer_and_the_stop_token_is_stripped(self):
         # Markers arrive split across decode steps, as a real tokenizer produces them.
